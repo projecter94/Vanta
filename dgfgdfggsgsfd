@@ -1,3 +1,91 @@
+--[[ 
+    VANTA AUTHENTICATION SYSTEM
+    Place this at the very top of your GitHub file.
+]]
+
+-- 1. Configuration
+local API_BASE = "https://xed.onrender.com/"
+local SERVER_SECRET = "YOUR_SERVER_SECRET_HERE" -- MUST MATCH process.env.SERVER_SECRET on Render
+
+-- 2. Validate Loader Format
+if type(script_key) ~= "string" or #script_key < 5 then
+    game.Players.LocalPlayer:Kick("Vanta Error: Invalid Loader Format.\nPlease define 'script_key' before executing.")
+    task.wait(2)
+    while true do end -- Crash if they try to bypass kick
+end
+
+if type(getgenv().VantaOwner) ~= "string" then
+    -- Optional: Enforce Owner variable presence
+    warn("Vanta Warning: VantaOwner variable not set.")
+end
+
+-- 3. Authentication Function
+local function VantaAuth()
+    local http = game:GetService("HttpService")
+    local rbxa = game:GetService("RbxAnalyticsService")
+    
+    -- Get HWID
+    local hwid = "Unknown"
+    pcall(function() hwid = rbxa:GetClientId() end)
+    
+    -- Get Executor Name
+    local executor = (identifyexecutor and identifyexecutor()) or "Unknown"
+
+    -- Send Request to Your Server
+    local success, response = pcall(function()
+        return request({
+            Url = API_BASE .. "api/verify",
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["x-client-secret"] = SERVER_SECRET 
+            },
+            Body = http:JSONEncode({
+                key = script_key,
+                device = {
+                    hwid = hwid,
+                    ip = "0.0.0.0", -- Server automatically detects the real IP
+                    executor = executor,
+                    place_id = game.PlaceId
+                }
+            })
+        })
+    end)
+
+    -- Handle Network Errors
+    if not success or not response then
+        game.Players.LocalPlayer:Kick("Vanta Error: Connection to authentication server failed.")
+        return false
+    end
+
+    -- Handle Server Response
+    if response.StatusCode ~= 200 then
+        game.Players.LocalPlayer:Kick("Vanta Error: Server returned " .. tostring(response.StatusCode))
+        return false
+    end
+
+    local data = http:JSONDecode(response.Body)
+
+    -- Handle Auth Result
+    if not data.ok then
+        -- Key is invalid, blacklisted, or HWID mismatch
+        game.Players.LocalPlayer:Kick("Vanta Auth Failed: " .. (data.msg or "Invalid Key"))
+        return false
+    end
+
+    -- Auth Success
+    print("✅ Vanta Authentication Successful!")
+    return true
+end
+
+-- 4. Execute Auth
+if not VantaAuth() then
+    -- Stop script execution immediately if auth fails
+    return 
+end
+
+print("Opening script after auth system finished have fun lol")
+
 getgenv().BaitConfig = {
     Enabled = getgenv().Bait or false,   -- Controlled by bait! on/off
     Interval = 1.4,                      -- Time between bait pulses
