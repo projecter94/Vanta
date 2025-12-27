@@ -1,4 +1,10 @@
-const {Client,GatewayIntentBits}=require('discord.js'),fetch=require('node-fetch'),API_URL='https://xed.onrender.com/',ADMIN_SECRET='vanta_supersecretkey_2025_ABC123',client=new Client({'intents':[GatewayIntentBits['Guilds'],GatewayIntentBits['GuildMessages'],GatewayIntentBits['MessageContent']]});globalThis['fetch']=fetch;globalThis['API_URL']=API_URL;globalThis['ADMIN_SECRET']=ADMIN_SECRET;globalThis['client']=client;
+const { Client, GatewayIntentBits } = require('discord.js');
+const fetch = require('node-fetch');
+
+const API_URL = "https://xed.onrender.com/";
+const ADMIN_SECRET = "vanta_supersecretkey_2025_ABC123";
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 
 -- this file was generated using ironbrew1
