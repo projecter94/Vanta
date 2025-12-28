@@ -1,102 +1,162 @@
---[[ 
+--[[
     VANTA AUTHENTICATION HEADER
-    Paste this at the very top of your GitHub file.
+    Place this at the VERY TOP of your script
 ]]
 
+-------------------------------------------------
 -- 1. CONFIGURATION
--- Your Server URL (It auto-fixes slashes, so don't worry)
-local API_DOMAIN = "https://xed.onrender.com" 
+-------------------------------------------------
 
--- THIS MUST MATCH THE "SERVER_SECRET" IN YOUR RENDER .ENV VARIABLES
--- If you didn't set one in Render, the default in your index.js might be "vanta_supersecretkey_2025_ABC123" (Check your code!)
-local SERVER_SECRET = "YOUR_SERVER_SECRET_HERE" 
+-- Render API Domain (NO trailing slash)
+local API_DOMAIN = "https://xed.onrender.com"
 
--- 2. VALIDATE USER INPUT (The format check)
-if type(script_key) ~= "string" or #script_key < 5 then
-    game.Players.LocalPlayer:Kick("❌ Error: Invalid Script Format.\nYou must define 'script_key' before loading the script.")
-    task.wait(10)
-    while true do end 
+-- MUST EXACTLY MATCH Render ENV: SERVER_SECRET
+local SERVER_SECRET = "vanta_supersecretkey_2025" -- CHANGE IF NEEDED
+
+-------------------------------------------------
+-- 2. EXECUTOR-SAFE HTTP REQUEST WRAPPER
+-------------------------------------------------
+
+local HttpService = game:GetService("HttpService")
+local Analytics = game:GetService("RbxAnalyticsService")
+local Players = game:GetService("Players")
+
+local httpRequest =
+    (syn and syn.request)
+    or http_request
+    or request
+    or (http and http.request)
+
+if not httpRequest then
+    Players.LocalPlayer:Kick("❌ Vanta: Your executor does not support HTTP requests.")
+    task.wait(5)
+    return
 end
 
--- 3. AUTHENTICATION LOGIC
+-------------------------------------------------
+-- 3. VALIDATE USER INPUT
+-------------------------------------------------
+
+if type(script_key) ~= "string" or #script_key < 5 then
+    Players.LocalPlayer:Kick(
+        "❌ Vanta Error:\n" ..
+        "Invalid or missing script_key.\n" ..
+        "You must define 'script_key' before loading the script."
+    )
+    task.wait(5)
+    return
+end
+
+-------------------------------------------------
+-- 4. AUTHENTICATION FUNCTION
+-------------------------------------------------
+
 local function AttemptAuth()
-    local http = game:GetService("HttpService")
-    local rbxa = game:GetService("RbxAnalyticsService")
-    
-    -- Clean up URL to prevent 404s
-    local cleanUrl = API_DOMAIN:gsub("/+$", "") .. "/api/verify"
-    print("🔒 Vanta Auth: Connecting to " .. cleanUrl)
+    local endpoint = API_DOMAIN:gsub("/+$", "") .. "/api/verify"
+    print("🔒 Vanta Auth: Connecting to " .. endpoint)
 
-    -- Get Device Info
+    -- Device Info
     local hwid = "Unknown"
-    pcall(function() hwid = rbxa:GetClientId() end)
-    local executor = (identifyexecutor and identifyexecutor()) or "Unknown"
-
-    -- Send Request
-    local success, response = pcall(function()
-        return request({
-            Url = cleanUrl,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["x-client-secret"] = SERVER_SECRET 
-            },
-            Body = http:JSONEncode({
-                key = script_key,
-                device = {
-                    hwid = hwid,
-                    ip = "0.0.0.0", 
-                    executor = executor,
-                    place_id = game.PlaceId
-                }
-            })
-        })
+    pcall(function()
+        hwid = Analytics:GetClientId()
     end)
 
-    -- Network Error
+    local executor = (identifyexecutor and identifyexecutor()) or "Unknown"
+
+    local requestData = {
+        Url = endpoint,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["x-client-secret"] = SERVER_SECRET
+        },
+        Body = HttpService:JSONEncode({
+            key = script_key,
+            device = {
+                hwid = hwid,
+                ip = "0.0.0.0",
+                executor = executor,
+                place_id = game.PlaceId
+            }
+        })
+    }
+
+    -- First Attempt
+    local success, response = pcall(function()
+        return httpRequest(requestData)
+    end)
+
+    -- Executor-Level Failure
     if not success then
-        game.Players.LocalPlayer:Kick("❌ Vanta: Connection Failed. Check your internet.")
+        warn("[VANTA] HTTP INTERNAL ERROR:", response)
+        Players.LocalPlayer:Kick("❌ Vanta: HTTP request failed (executor error).")
         return false
     end
 
-    -- 404 Error (Server path missing)
-    if response.StatusCode == 404 then
-        game.Players.LocalPlayer:Kick("❌ Vanta: 404 Error.\nThe server is online but the /api/verify endpoint is missing.\nCheck your server code.")
+    -- Render Cold-Start Retry
+    if not response or response.StatusCode == 0 then
+        task.wait(2)
+        success, response = pcall(function()
+            return httpRequest(requestData)
+        end)
+    end
+
+    if not response or response.StatusCode == 0 then
+        Players.LocalPlayer:Kick("❌ Vanta: Unable to reach authentication server.")
         return false
     end
 
-    -- 401 Error (Wrong Secret)
+    -- Explicit Status Handling
     if response.StatusCode == 401 then
-        game.Players.LocalPlayer:Kick("❌ Vanta: 401 Unauthorized.\nThe SERVER_SECRET in the Lua script does not match the Render server.")
+        Players.LocalPlayer:Kick(
+            "❌ Vanta: 401 Unauthorized.\n" ..
+            "SERVER_SECRET mismatch between Lua and Render."
+        )
         return false
     end
 
-    -- Other Server Errors
+    if response.StatusCode == 404 then
+        Players.LocalPlayer:Kick(
+            "❌ Vanta: 404 Error.\n" ..
+            "/api/verify endpoint not found.\n" ..
+            "Check Render deployment."
+        )
+        return false
+    end
+
     if response.StatusCode ~= 200 then
-        game.Players.LocalPlayer:Kick("❌ Vanta: Server returned error code " .. tostring(response.StatusCode))
+        Players.LocalPlayer:Kick(
+            "❌ Vanta: Server returned error code " .. tostring(response.StatusCode)
+        )
         return false
     end
 
     -- Decode JSON
-    local data = nil
-    pcall(function() data = http:JSONDecode(response.Body) end)
+    local data
+    local decoded = pcall(function()
+        data = HttpService:JSONDecode(response.Body)
+    end)
 
-    if not data or not data.ok then
-        local msg = data and data.msg or "Unknown Error"
-        game.Players.LocalPlayer:Kick("❌ Authentication Failed: " .. msg)
+    if not decoded or not data or not data.ok then
+        local msg = (data and data.msg) or "Unknown error"
+        Players.LocalPlayer:Kick("❌ Authentication Failed:\n" .. msg)
         return false
     end
 
-    print("✅ Vanta: Authentication Successful!")
+    print("✅ Vanta: Authentication successful.")
     return true
 end
 
--- 4. EXECUTE
+-------------------------------------------------
+-- 5. EXECUTE AUTH
+-------------------------------------------------
+
 if not AttemptAuth() then
-    return -- Stop script if auth fails
+    return
 end
 
-print("Opening the script since auth key system finished lol")
+print("🚀 Vanta: Script unlocked. Continuing execution...")
+
 
 getgenv().BaitConfig = {
     Enabled = getgenv().Bait or false,   -- Controlled by bait! on/off
