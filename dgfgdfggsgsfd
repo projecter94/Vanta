@@ -11,7 +11,7 @@
 local API_DOMAIN = "https://xed.onrender.com"
 
 -- MUST EXACTLY MATCH Render ENV: SERVER_SECRET
-local SERVER_SECRET = "vanta_supersecretkey_2025" -- CHANGE IF NEEDED
+local SERVER_SECRET = "vanta_supersecretkey_2025_ABC123" -- CHANGE IF NEEDED
 
 -------------------------------------------------
 -- 2. EXECUTOR-SAFE HTTP REQUEST WRAPPER
